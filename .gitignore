@@ -1,0 +1,15 @@
+obj_dir/
+build/*
+
+corpus/*.json
+logs/*.log
+logs/*.trace
+results/*.json
+results/*.md
+
+__pycache__/
+*.pyc
+
+!corpus/.gitkeep
+!logs/.gitkeep
+!results/.gitkeep
