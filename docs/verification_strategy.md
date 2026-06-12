@@ -13,3 +13,5 @@ The scoreboard compares every metadata field:
 - Error flags
 
 Directed tests cover specific protocol and malformed-frame cases. Random tests are generated from a fixed seed and include valid packets, VLAN packets, unsupported EtherTypes, and malformed packets. Backpressure is tested with `meta_ready` stalls and input valid gaps.
+
+For signal-level debug, `make waves CASE=<directed_case>` runs one directed packet with Verilator VCD dumping enabled and writes `waves/<directed_case>.vcd`.

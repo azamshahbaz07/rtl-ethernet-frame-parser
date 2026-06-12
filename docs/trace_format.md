@@ -15,3 +15,13 @@ cycle=49 event=meta ready=1 dst_mac=0xffffffffffff src_mac=0x001122334455 ethert
 ```
 
 `tools/parse_trace.py` consumes these logs and writes `results/trace_summary.json`.
+
+## VCD Waveforms
+
+The Verilator model is built with tracing enabled. Generate a waveform for a single directed packet case with:
+
+```bash
+make waves CASE=valid_ipv4_udp_min_payload
+```
+
+This writes `waves/<case>.vcd`. Open the VCD in GTKWave or another waveform viewer to inspect RTL signals such as `clk`, `rst_n`, `in_valid`, `in_ready`, `in_sop`, `in_eop`, `meta_valid`, `meta_ready`, `state_dbg`, and `byte_idx_dbg`.

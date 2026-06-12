@@ -75,6 +75,12 @@ Trace one named directed test:
 make trace CASE=valid_ipv4_udp_min_payload
 ```
 
+Generate a VCD waveform for one named directed test:
+
+```bash
+make waves CASE=valid_ipv4_udp_min_payload
+```
+
 Generate a coverage report from the latest regression artifacts:
 
 ```bash
@@ -105,6 +111,7 @@ sim/      Verilator C++ testbench, reference parser, scoreboard, trace logger
 tools/    Python packet generation, regression, trace, and coverage tools
 corpus/   Generated directed and random packet JSON
 logs/     Simulator output and traces
+waves/    Generated Verilator VCD waveforms
 results/  Regression JSON and Markdown reports
 docs/     Architecture and verification notes
 tests/    Python unit tests for tooling

@@ -4,12 +4,15 @@
 #include "scoreboard.hpp"
 #include "trace.hpp"
 #include "verilated.h"
+#include "verilated_vcd_c.h"
 
 #include <algorithm>
 #include <cstdint>
 #include <cstdlib>
 #include <iostream>
+#include <memory>
 #include <random>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -17,6 +20,7 @@ namespace {
 struct Options {
     std::string corpus = "corpus/directed.json";
     std::string trace = "logs/sim.trace";
+    std::string vcd;
     std::string case_filter;
     uint32_t seed = 1;
 };
@@ -39,6 +43,8 @@ Options parse_args(int argc, char** argv) {
             options.corpus = need_value(arg);
         } else if (arg == "--trace") {
             options.trace = need_value(arg);
+        } else if (arg == "--vcd") {
+            options.vcd = need_value(arg);
         } else if (arg == "--case") {
             options.case_filter = need_value(arg);
         } else if (arg == "--seed") {
@@ -50,21 +56,53 @@ Options parse_args(int argc, char** argv) {
     return options;
 }
 
-void eval_comb(Veth_frame_parser& dut) {
+class WaveDump {
+public:
+    WaveDump(Veth_frame_parser& dut, const std::string& path) {
+        if (path.empty()) {
+            return;
+        }
+        Verilated::traceEverOn(true);
+        trace_ = std::make_unique<VerilatedVcdC>();
+        dut.trace(trace_.get(), 99);
+        trace_->open(path.c_str());
+    }
+
+    ~WaveDump() {
+        if (trace_) {
+            trace_->close();
+        }
+    }
+
+    void dump(uint64_t time) {
+        if (trace_) {
+            trace_->dump(time);
+        }
+    }
+
+private:
+    std::unique_ptr<VerilatedVcdC> trace_;
+};
+
+void eval_comb(Veth_frame_parser& dut, WaveDump& waves, uint64_t& sim_time) {
     dut.eval();
+    waves.dump(sim_time++);
 }
 
-void tick(Veth_frame_parser& dut, uint64_t& cycle) {
+void tick(Veth_frame_parser& dut, uint64_t& cycle, WaveDump& waves, uint64_t& sim_time) {
     dut.clk = 0;
     dut.eval();
+    waves.dump(sim_time++);
     dut.clk = 1;
     dut.eval();
+    waves.dump(sim_time++);
     ++cycle;
     dut.clk = 0;
     dut.eval();
+    waves.dump(sim_time++);
 }
 
-void reset(Veth_frame_parser& dut, uint64_t& cycle) {
+void reset(Veth_frame_parser& dut, uint64_t& cycle, WaveDump& waves, uint64_t& sim_time) {
     dut.in_data = 0;
     dut.in_valid = 0;
     dut.in_sop = 0;
@@ -72,10 +110,10 @@ void reset(Veth_frame_parser& dut, uint64_t& cycle) {
     dut.meta_ready = 1;
     dut.rst_n = 0;
     for (int i = 0; i < 5; ++i) {
-        tick(dut, cycle);
+        tick(dut, cycle, waves, sim_time);
     }
     dut.rst_n = 1;
-    tick(dut, cycle);
+    tick(dut, cycle, waves, sim_time);
 }
 
 struct RunResult {
@@ -86,13 +124,15 @@ struct RunResult {
     std::vector<std::string> messages;
 };
 
-RunResult run_one(const PacketCase& packet, uint32_t seed, TraceLog& trace) {
+RunResult run_one(const PacketCase& packet, uint32_t seed, TraceLog& trace, const std::string& vcd_path) {
     RunResult result;
     result.expected = parse_reference(packet.frame);
 
     Veth_frame_parser dut;
+    WaveDump waves(dut, vcd_path);
     uint64_t cycle = 0;
-    reset(dut, cycle);
+    uint64_t sim_time = 0;
+    reset(dut, cycle, waves, sim_time);
 
     std::mt19937 rng(seed);
     std::uniform_real_distribution<double> dist(0.0, 1.0);
@@ -105,7 +145,7 @@ RunResult run_one(const PacketCase& packet, uint32_t seed, TraceLog& trace) {
                 dut.in_sop = 0;
                 dut.in_eop = 0;
                 dut.meta_ready = 1;
-                tick(dut, cycle);
+                tick(dut, cycle, waves, sim_time);
             }
         }
 
@@ -114,21 +154,21 @@ RunResult run_one(const PacketCase& packet, uint32_t seed, TraceLog& trace) {
         dut.in_sop = (i == 0);
         dut.in_eop = (i == packet.frame.size() - 1);
         dut.meta_ready = 1;
-        eval_comb(dut);
+        eval_comb(dut, waves, sim_time);
         while (!dut.in_ready) {
             dut.in_valid = 0;
             dut.in_sop = 0;
             dut.in_eop = 0;
-            tick(dut, cycle);
+            tick(dut, cycle, waves, sim_time);
             dut.in_data = packet.frame[i];
             dut.in_valid = 1;
             dut.in_sop = (i == 0);
             dut.in_eop = (i == packet.frame.size() - 1);
-            eval_comb(dut);
+            eval_comb(dut, waves, sim_time);
         }
         trace.byte(cycle, packet.frame[i], i == 0, i == packet.frame.size() - 1,
                    dut.state_dbg, dut.byte_idx_dbg, dut.in_ready);
-        tick(dut, cycle);
+        tick(dut, cycle, waves, sim_time);
         dut.in_valid = 0;
         dut.in_sop = 0;
         dut.in_eop = 0;
@@ -143,11 +183,11 @@ RunResult run_one(const PacketCase& packet, uint32_t seed, TraceLog& trace) {
         dut.in_valid = 0;
         dut.in_sop = 0;
         dut.in_eop = 0;
-        eval_comb(dut);
+        eval_comb(dut, waves, sim_time);
 
         const bool valid_now = dut.meta_valid;
         dut.meta_ready = (valid_now && stall_remaining > 0) ? 0 : 1;
-        eval_comb(dut);
+        eval_comb(dut, waves, sim_time);
 
         if (dut.meta_valid) {
             ParsedMeta current = unpack_dut_meta(dut.meta_flat);
@@ -168,12 +208,12 @@ RunResult run_one(const PacketCase& packet, uint32_t seed, TraceLog& trace) {
             if (dut.meta_ready) {
                 result.got = current;
                 result.observed_meta = true;
-                tick(dut, cycle);
+                tick(dut, cycle, waves, sim_time);
                 break;
             }
         }
 
-        tick(dut, cycle);
+        tick(dut, cycle, waves, sim_time);
         if (valid_now && stall_remaining > 0) {
             --stall_remaining;
         }
@@ -214,6 +254,9 @@ int main(int argc, char** argv) {
 
     try {
         const Options options = parse_args(argc, argv);
+        if (!options.vcd.empty() && options.case_filter.empty()) {
+            throw std::runtime_error("--vcd requires --case so one waveform file maps to one packet case");
+        }
         const std::vector<PacketCase> cases = load_corpus(options.corpus);
         TraceLog trace(options.trace);
 
@@ -224,7 +267,7 @@ int main(int argc, char** argv) {
                 continue;
             }
             const uint32_t case_seed = options.seed ^ static_cast<uint32_t>(std::hash<std::string>{}(packet.name));
-            RunResult result = run_one(packet, case_seed, trace);
+            RunResult result = run_one(packet, case_seed, trace, options.vcd);
             ++run_count;
             if (result.pass) {
                 ++pass_count;

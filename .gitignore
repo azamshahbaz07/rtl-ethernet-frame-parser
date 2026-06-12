@@ -6,6 +6,9 @@ logs/*.log
 logs/*.trace
 results/*.json
 results/*.md
+waves/*.vcd
+waves/*.fst
+waves/*.gtkw
 
 __pycache__/
 *.pyc
@@ -13,3 +16,4 @@ __pycache__/
 !corpus/.gitkeep
 !logs/.gitkeep
 !results/.gitkeep
+!waves/.gitkeep
