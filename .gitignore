@@ -9,11 +9,8 @@ results/*.md
 waves/*.vcd
 waves/*.fst
 waves/*.gtkw
+screenshots/*.png
+!screenshots/valid_ipv4_udp_min_payload_gtkwave.png
 
 __pycache__/
 *.pyc
-
-!corpus/.gitkeep
-!logs/.gitkeep
-!results/.gitkeep
-!waves/.gitkeep

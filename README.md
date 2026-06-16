@@ -1,6 +1,6 @@
 # RTL Ethernet Frame Parser
 
-This project implements a streaming Ethernet / IPv4 / UDP frame parser in SystemVerilog, verifies it with a Verilator C++ scoreboard against a software reference parser, and uses Python tooling for packet generation, randomized regression, trace parsing, and coverage-style reporting.
+This project implements a streaming Ethernet / IPv4 / UDP frame parser in SystemVerilog, verifies it with a Verilator C++ scoreboard against a software reference parser, and uses Python tooling for constrained-random packet generation, randomized backpressure, trace parsing, and functional coverage reporting.
 
 ```text
 Python packet generation
@@ -69,6 +69,8 @@ Run directed tests plus 500 seeded random tests:
 make regression
 ```
 
+The random corpus starts with coverage-closure seed cases, then fills the rest with constrained random packets and negative tests across VLAN mode, EtherType, IPv4 validity, UDP validity, frame length, truncation, and backpressure.
+
 Trace one named directed test:
 
 ```bash
@@ -81,11 +83,25 @@ Generate a VCD waveform for one named directed test:
 make waves CASE=valid_ipv4_udp_min_payload
 ```
 
+Capture or refresh a PNG screenshot from GTKWave:
+
+```bash
+make wave-screenshot CASE=valid_ipv4_udp_min_payload
+```
+
 Generate a coverage report from the latest regression artifacts:
 
 ```bash
 make report
 ```
+
+The report includes a functional coverage matrix:
+
+```text
+VLAN x EtherType x IPv4-validity x UDP-validity x frame-length bucket
+```
+
+`results/coverage.md` includes required-bin HIT/MISS status, per-dimension bin counts, observed matrix bins, backpressure bins, and trace-derived error counts.
 
 ## Example Output
 
@@ -109,13 +125,12 @@ cycle=49 event=meta ready=1 dst_mac=0xffffffffffff src_mac=0x001122334455 ethert
 rtl/      SystemVerilog package and parser RTL
 sim/      Verilator C++ testbench, reference parser, scoreboard, trace logger
 tools/    Python packet generation, regression, trace, and coverage tools
-corpus/   Generated directed and random packet JSON
-logs/     Simulator output and traces
-waves/    Generated Verilator VCD waveforms
-results/  Regression JSON and Markdown reports
+screenshots/ Curated waveform screenshots
 docs/     Architecture and verification notes
 tests/    Python unit tests for tooling
 ```
+
+Generated artifacts are written to `corpus/`, `logs/`, `waves/`, `results/`, and `obj_dir/` when you run the Makefile targets. They are intentionally ignored by git.
 
 ## Limitations
 

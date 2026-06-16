@@ -5,7 +5,7 @@ RTL_SRCS := rtl/eth_parser_pkg.sv rtl/eth_frame_parser.sv
 SIM_SRCS := sim/main.cpp sim/packet.cpp sim/reference_parser.cpp sim/scoreboard.cpp sim/trace.cpp
 SIM_EXE := obj_dir/eth_parser_sim
 
-.PHONY: build corpus run regression trace waves report test clean
+.PHONY: build corpus run regression trace waves wave-screenshot report test clean
 
 build:
 	$(VERILATOR) -Wall -Wno-fatal --trace --cc $(RTL_SRCS) \
@@ -39,6 +39,9 @@ waves: build corpus
 	$(SIM_EXE) --corpus corpus/directed.json --case $(CASE) --trace logs/$(CASE).trace --vcd waves/$(CASE).vcd --seed 123
 	@echo "Wrote waves/$(CASE).vcd"
 
+wave-screenshot: waves
+	$(PYTHON) tools/capture_gtkwave_screenshot.py --case $(CASE)
+
 report:
 	$(PYTHON) tools/coverage_report.py
 
@@ -49,5 +52,6 @@ clean:
 	rm -rf obj_dir build/*
 	rm -f logs/*.log logs/*.trace
 	rm -f waves/*.vcd waves/*.fst waves/*.gtkw
+	rm -f screenshots/debug_*.png screenshots/*_vcdrom*.png
 	rm -f results/*.json results/*.md
 	rm -f corpus/*.json

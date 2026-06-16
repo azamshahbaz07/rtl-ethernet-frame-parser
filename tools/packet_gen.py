@@ -35,6 +35,25 @@ class PacketCase:
         }
 
 
+def _normalize_tags(case: PacketCase) -> PacketCase:
+    case.tags = sorted(set(case.tags))
+    return case
+
+
+def _with_backpressure(case: PacketCase, rng: random.Random) -> PacketCase:
+    if rng.random() < 0.45:
+        case.input_gap_prob = rng.choice([0.05, 0.10, 0.20, 0.35])
+        case.tags.append("input_valid_gaps")
+        case.tags.append("random_input_gaps")
+    if rng.random() < 0.45:
+        case.meta_stall_cycles = rng.randrange(1, 9)
+        case.tags.append("meta_ready_backpressure")
+        case.tags.append("random_meta_ready_stalls")
+    if case.input_gap_prob > 0 and case.meta_stall_cycles > 0:
+        case.tags.append("random_backpressure_both")
+    return _normalize_tags(case)
+
+
 def _mac_to_bytes(value: int | bytes | Iterable[int]) -> bytes:
     if isinstance(value, bytes):
         if len(value) != 6:
@@ -125,7 +144,8 @@ def make_ipv4_udp_frame(
     tags: list[str] | None = None,
 ) -> PacketCase:
     udp_len = len(payload) + 8 if udp_length is None else udp_length
-    total_len = len(payload) + 28 if ipv4_total_length is None else ipv4_total_length
+    default_total_len = len(payload) + (28 if ipv4_protocol == IPPROTO_UDP else 20)
+    total_len = default_total_len if ipv4_total_length is None else ipv4_total_length
     ethertype = ETHERTYPE_VLAN if vlan_tci is not None else ETHERTYPE_IPV4
     frame = ethernet_header(dst_mac, src_mac, ethertype)
     case_tags = ["ipv4"]
@@ -168,7 +188,14 @@ def make_ipv4_udp_frame(
 
 def make_unsupported_ethertype(name: str, ethertype: int, payload_len: int = 46) -> PacketCase:
     frame = ethernet_header(0xFFFFFFFFFFFF, 0x001122334455, ethertype) + bytes((i & 0xFF) for i in range(payload_len))
-    return PacketCase(name=name, frame=frame, tags=["unsupported_ethertype"])
+    tags = ["unsupported_ethertype"]
+    if ethertype == ETHERTYPE_ARP:
+        tags.append("unsupported_arp")
+    elif ethertype == ETHERTYPE_IPV6:
+        tags.append("unsupported_ipv6")
+    else:
+        tags.append("unsupported_other_ethertype")
+    return PacketCase(name=name, frame=frame, tags=tags)
 
 
 def make_vlan_unsupported_inner(name: str, inner_ethertype: int, payload_len: int = 42) -> PacketCase:
@@ -214,6 +241,47 @@ def directed_cases() -> list[PacketCase]:
     ]
 
 
+def coverage_closure_cases() -> list[PacketCase]:
+    cases = [
+        make_ipv4_udp_frame("cov_no_vlan_min_udp", payload=b"", tags=["coverage_goal", "valid"]),
+        make_ipv4_udp_frame("cov_no_vlan_small_udp", payload=bytes(range(8)), tags=["coverage_goal", "valid"]),
+        make_ipv4_udp_frame("cov_no_vlan_medium_udp", payload=bytes(range(128)), tags=["coverage_goal", "valid"]),
+        make_ipv4_udp_frame("cov_no_vlan_large_udp", payload=bytes((i & 0xFF) for i in range(512)), tags=["coverage_goal", "valid"]),
+        make_ipv4_udp_frame("cov_vlan_min_udp", payload=b"", vlan_tci=0x0123, tags=["coverage_goal", "valid"]),
+        make_ipv4_udp_frame("cov_vlan_small_udp", payload=bytes(range(8)), vlan_tci=0x1123, tags=["coverage_goal", "valid"]),
+        make_ipv4_udp_frame("cov_vlan_medium_udp", payload=bytes(range(128)), vlan_tci=0x2123, tags=["coverage_goal", "valid"]),
+        make_ipv4_udp_frame("cov_vlan_large_udp", payload=bytes((i & 0xFF) for i in range(512)), vlan_tci=0x3123, tags=["coverage_goal", "valid"]),
+        make_unsupported_ethertype("cov_unsupported_arp", ETHERTYPE_ARP, payload_len=46),
+        make_unsupported_ethertype("cov_unsupported_ipv6", ETHERTYPE_IPV6, payload_len=46),
+        make_unsupported_ethertype("cov_unsupported_other_ethertype", 0x88B5, payload_len=46),
+        make_vlan_unsupported_inner("cov_vlan_unsupported_inner", ETHERTYPE_ARP, payload_len=42),
+        make_ipv4_udp_frame("cov_bad_version", ipv4_version=6, tags=["coverage_goal", "error_ipv4_bad_version"]),
+        make_ipv4_udp_frame("cov_bad_ihl", ipv4_ihl=6, tags=["coverage_goal", "error_ipv4_options_unsupported"]),
+        make_ipv4_udp_frame("cov_total_length_too_small", ipv4_total_length=19, tags=["coverage_goal", "error_ipv4_total_length"]),
+        make_ipv4_udp_frame(
+            "cov_unsupported_tcp",
+            ipv4_protocol=IPPROTO_TCP,
+            ipv4_total_length=36,
+            payload=bytes(range(16)),
+            tags=["coverage_goal", "unsupported_l4_protocol"],
+        ),
+        make_ipv4_udp_frame("cov_truncated_ipv4", truncate_to=19, tags=["coverage_goal", "error_unexpected_eop"]),
+        make_ipv4_udp_frame("cov_truncated_udp", ipv4_total_length=24, truncate_to=38, tags=["coverage_goal", "error_unexpected_eop"]),
+        make_ipv4_udp_frame("cov_udp_length_too_small", udp_length=7, tags=["coverage_goal", "error_udp_length"]),
+        make_ipv4_udp_frame("cov_udp_length_too_large", udp_length=64, tags=["coverage_goal", "error_udp_length"]),
+        PacketCase("cov_short_eth", b"\xff\xff\xff\xff\xff\xff", tags=["coverage_goal", "error_short_frame", "truncated"]),
+    ]
+
+    cases[1].input_gap_prob = 0.20
+    cases[1].tags.extend(["input_valid_gaps", "coverage_input_gaps"])
+    cases[5].meta_stall_cycles = 4
+    cases[5].tags.extend(["meta_ready_backpressure", "coverage_meta_ready_stalls"])
+    cases[13].input_gap_prob = 0.10
+    cases[13].meta_stall_cycles = 3
+    cases[13].tags.extend(["input_valid_gaps", "meta_ready_backpressure", "coverage_backpressure_both"])
+    return [_normalize_tags(case) for case in cases]
+
+
 def _random_payload(rng: random.Random, max_len: int = 512) -> bytes:
     length = rng.choice([0, 1, 8, 32, 128, 512, rng.randrange(0, max_len + 1)])
     return bytes(rng.randrange(0, 256) for _ in range(length))
@@ -230,7 +298,7 @@ def random_case(index: int, rng: random.Random) -> PacketCase:
     dst_port = rng.randrange(1, 65536)
 
     if roll < 0.70:
-        return make_ipv4_udp_frame(
+        return _with_backpressure(make_ipv4_udp_frame(
             f"random_{index:04d}_valid_ipv4_udp",
             payload=payload,
             dst_mac=dst_mac,
@@ -239,13 +307,11 @@ def random_case(index: int, rng: random.Random) -> PacketCase:
             dst_ip=dst_ip,
             src_port=src_port,
             dst_port=dst_port,
-            input_gap_prob=0.10 if rng.random() < 0.2 else 0.0,
-            meta_stall_cycles=rng.randrange(0, 5) if rng.random() < 0.2 else 0,
             tags=["valid", "random"],
-        )
+        ), rng)
     if roll < 0.80:
         tci = (rng.randrange(0, 8) << 13) | (rng.randrange(0, 2) << 12) | rng.randrange(0, 4096)
-        return make_ipv4_udp_frame(
+        return _with_backpressure(make_ipv4_udp_frame(
             f"random_{index:04d}_valid_vlan_ipv4_udp",
             payload=payload,
             dst_mac=dst_mac,
@@ -256,31 +322,34 @@ def random_case(index: int, rng: random.Random) -> PacketCase:
             dst_port=dst_port,
             vlan_tci=tci,
             tags=["valid", "random"],
-        )
+        ), rng)
     if roll < 0.90:
         ethertype = rng.choice([ETHERTYPE_ARP, ETHERTYPE_IPV6, rng.randrange(0x0000, 0xFFFF)])
         if ethertype in (ETHERTYPE_IPV4, ETHERTYPE_VLAN):
             ethertype = 0x88B5
         case = make_unsupported_ethertype(f"random_{index:04d}_unsupported_ethertype", ethertype, payload_len=len(payload))
         case.tags.append("random")
-        return case
+        return _with_backpressure(case, rng)
 
     malformed = rng.choice(["bad_version", "bad_ihl", "small_total", "udp_small", "udp_large", "truncate_ip", "truncate_udp"])
     if malformed == "bad_version":
-        return make_ipv4_udp_frame(f"random_{index:04d}_bad_version", payload=payload, ipv4_version=rng.choice([0, 5, 6]), tags=["random", "error_ipv4_bad_version"])
+        return _with_backpressure(make_ipv4_udp_frame(f"random_{index:04d}_bad_version", payload=payload, ipv4_version=rng.choice([0, 5, 6]), tags=["random", "error_ipv4_bad_version"]), rng)
     if malformed == "bad_ihl":
-        return make_ipv4_udp_frame(f"random_{index:04d}_bad_ihl", payload=payload, ipv4_ihl=rng.choice([0, 4, 6, 15]), tags=["random", "error_ipv4_options_unsupported"])
+        return _with_backpressure(make_ipv4_udp_frame(f"random_{index:04d}_bad_ihl", payload=payload, ipv4_ihl=rng.choice([0, 4, 6, 15]), tags=["random", "error_ipv4_options_unsupported"]), rng)
     if malformed == "small_total":
-        return make_ipv4_udp_frame(f"random_{index:04d}_small_total", payload=payload, ipv4_total_length=rng.randrange(0, 20), tags=["random", "error_ipv4_total_length"])
+        return _with_backpressure(make_ipv4_udp_frame(f"random_{index:04d}_small_total", payload=payload, ipv4_total_length=rng.randrange(0, 20), tags=["random", "error_ipv4_total_length"]), rng)
     if malformed == "udp_small":
-        return make_ipv4_udp_frame(f"random_{index:04d}_udp_small", payload=payload, udp_length=rng.randrange(0, 8), tags=["random", "error_udp_length"])
+        return _with_backpressure(make_ipv4_udp_frame(f"random_{index:04d}_udp_small", payload=payload, udp_length=rng.randrange(0, 8), tags=["random", "error_udp_length"]), rng)
     if malformed == "udp_large":
-        return make_ipv4_udp_frame(f"random_{index:04d}_udp_large", payload=payload, udp_length=len(payload) + 32, tags=["random", "error_udp_length"])
+        return _with_backpressure(make_ipv4_udp_frame(f"random_{index:04d}_udp_large", payload=payload, udp_length=len(payload) + 32, tags=["random", "error_udp_length"]), rng)
     if malformed == "truncate_ip":
-        return make_ipv4_udp_frame(f"random_{index:04d}_truncate_ip", payload=payload, truncate_to=rng.randrange(14, 34), tags=["random", "error_unexpected_eop"])
-    return make_ipv4_udp_frame(f"random_{index:04d}_truncate_udp", payload=payload, truncate_to=rng.randrange(34, 42), tags=["random", "error_unexpected_eop"])
+        return _with_backpressure(make_ipv4_udp_frame(f"random_{index:04d}_truncate_ip", payload=payload, truncate_to=rng.randrange(14, 34), tags=["random", "error_unexpected_eop"]), rng)
+    return _with_backpressure(make_ipv4_udp_frame(f"random_{index:04d}_truncate_udp", payload=payload, truncate_to=rng.randrange(34, 42), tags=["random", "error_unexpected_eop"]), rng)
 
 
 def random_cases(count: int, seed: int) -> list[PacketCase]:
     rng = random.Random(seed)
-    return [random_case(i, rng) for i in range(count)]
+    closure = coverage_closure_cases()
+    cases = closure[:count]
+    cases.extend(random_case(i, rng) for i in range(len(cases), count))
+    return cases

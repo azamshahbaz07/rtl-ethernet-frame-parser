@@ -6,6 +6,7 @@ import json
 from collections import Counter
 from pathlib import Path
 
+from coverage_model import MATRIX_FIELDS, coverage_summary
 from parse_trace import parse_trace
 
 
@@ -25,13 +26,29 @@ def _tag_counts(cases: list[dict]) -> Counter:
     return counts
 
 
+def _fmt_count_table(counts: Counter) -> list[str]:
+    lines = ["| Bin | Hits |", "|---|---:|"]
+    for name, count in sorted(counts.items()):
+        lines.append(f"| `{name}` | {count} |")
+    return lines
+
+
+def _fmt_matrix_key(key: tuple[str, str, str, str, str]) -> str:
+    return " / ".join(f"`{part}`" for part in key)
+
+
 def generate_report(corpus_paths: list[Path], regression_path: Path, trace_path: Path) -> str:
     cases = _load_cases(corpus_paths)
     tags = _tag_counts(cases)
+    coverage = coverage_summary(cases)
     regression = {}
     if regression_path.exists():
         regression = json.loads(regression_path.read_text(encoding="utf-8"))
     trace = parse_trace(trace_path)
+
+    total_required = len(coverage["required"])
+    hit_required = len(coverage["hit_required"])
+    coverage_pct = (100.0 * hit_required / total_required) if total_required else 0.0
 
     lines = [
         "# Coverage Report",
@@ -41,6 +58,55 @@ def generate_report(corpus_paths: list[Path], regression_path: Path, trace_path:
         f"- Directed cases: {regression.get('directed', {}).get('passed', 0)}/{regression.get('directed', {}).get('total', 0)} passed",
         f"- Random cases: {regression.get('random', {}).get('passed', 0)}/{regression.get('random', {}).get('total', 0)} passed",
         f"- Seed: {regression.get('seed', 'n/a')}",
+        "",
+        "## Functional Coverage Matrix",
+        "",
+        "Matrix dimensions: `VLAN x EtherType x IPv4-validity x UDP-validity x frame-length bucket`.",
+        "",
+        f"- Required matrix bins hit: {hit_required}/{total_required} ({coverage_pct:.1f}%)",
+        f"- Observed matrix bins: {len(coverage['matrix_counts'])}",
+        f"- Negative tests generated: {coverage['negative_count']}",
+        "",
+        "### Required Bin Status",
+        "",
+        "| Status | Matrix Bin | Hits | Example Cases |",
+        "|---|---|---:|---|",
+    ]
+
+    for goal in coverage["required"]:
+        count = coverage["matrix_counts"][goal]
+        status = "HIT" if count else "MISS"
+        examples = ", ".join(coverage["examples"].get(goal, [])) if count else "-"
+        lines.append(f"| {status} | {_fmt_matrix_key(goal)} | {count} | {examples} |")
+
+    lines.extend([
+        "",
+        "### Dimension Bin Counts",
+        "",
+    ])
+
+    for field in MATRIX_FIELDS:
+        lines.extend([f"#### `{field}`", ""])
+        lines.extend(_fmt_count_table(coverage["dimension_counts"][field]))
+        lines.append("")
+
+    lines.extend([
+        "### Backpressure Stimulus Bins",
+        "",
+    ])
+    lines.extend(_fmt_count_table(coverage["backpressure_counts"]))
+    lines.extend([
+        "",
+        "### Observed Matrix Bins",
+        "",
+        "| Hits | Matrix Bin | Example Cases |",
+        "|---:|---|---|",
+    ])
+    for key, count in sorted(coverage["matrix_counts"].items(), key=lambda item: (-item[1], item[0])):
+        examples = ", ".join(coverage["examples"].get(key, []))
+        lines.append(f"| {count} | {_fmt_matrix_key(key)} | {examples} |")
+
+    lines.extend([
         "",
         "## Protocol Coverage",
         "",
@@ -76,7 +142,7 @@ def generate_report(corpus_paths: list[Path], regression_path: Path, trace_path:
         "",
         "## Error Flags Observed In Trace",
         "",
-    ]
+    ])
     for name, count in trace["errors"].items():
         lines.append(f"- {name}: {count}")
     lines.append("")

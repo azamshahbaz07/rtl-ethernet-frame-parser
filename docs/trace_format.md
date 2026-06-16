@@ -24,4 +24,14 @@ The Verilator model is built with tracing enabled. Generate a waveform for a sin
 make waves CASE=valid_ipv4_udp_min_payload
 ```
 
-This writes `waves/<case>.vcd`. Open the VCD in GTKWave or another waveform viewer to inspect RTL signals such as `clk`, `rst_n`, `in_valid`, `in_ready`, `in_sop`, `in_eop`, `meta_valid`, `meta_ready`, `state_dbg`, and `byte_idx_dbg`.
+This writes `waves/<case>.vcd`. Open the VCD in GTKWave to inspect RTL signals such as `clk`, `rst_n`, `in_valid`, `in_ready`, `in_sop`, `in_eop`, `meta_valid`, `meta_ready`, `state_dbg`, and `byte_idx_dbg`.
+
+## GTKWave Screenshot
+
+Capture or refresh the curated GTKWave screenshot with:
+
+```bash
+make wave-screenshot CASE=valid_ipv4_udp_min_payload
+```
+
+This writes `screenshots/<case>_gtkwave.png`.

@@ -91,8 +91,19 @@ def main() -> int:
         summary["random"] = {"passed": passed, "total": total}
 
     (results / "regression.json").write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8")
-    run([sys.executable, "tools/parse_trace.py", str(trace_log), "--json-out", "results/trace_summary.json"], regression_log)
-    run([sys.executable, "tools/coverage_report.py"], regression_log)
+
+    proc = run([sys.executable, "tools/parse_trace.py", str(trace_log), "--json-out", "results/trace_summary.json"], regression_log)
+    if proc.returncode != 0:
+        print(proc.stdout, end="")
+        print(proc.stderr, end="", file=sys.stderr)
+        return proc.returncode
+
+    proc = run([sys.executable, "tools/coverage_report.py"], regression_log)
+    if proc.returncode != 0:
+        print(proc.stdout, end="")
+        print(proc.stderr, end="", file=sys.stderr)
+        return proc.returncode
+
     print(
         f"Regression complete: directed {summary['directed']['passed']}/{summary['directed']['total']} "
         f"random {summary['random']['passed']}/{summary['random']['total']}"
