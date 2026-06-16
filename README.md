@@ -89,6 +89,12 @@ Capture or refresh a PNG screenshot from GTKWave:
 make wave-screenshot CASE=valid_ipv4_udp_min_payload
 ```
 
+## Waveform Preview
+
+The screenshot below shows the `valid_ipv4_udp_min_payload` directed case opened in GTKWave. It captures the byte-stream handshake (`in_valid`, `in_ready`, `in_sop`, `in_eop`), metadata handshake (`meta_valid`, `meta_ready`), and parser debug signals (`state_dbg`, `byte_idx_dbg`, `accept`) during the start of the frame parse.
+
+![GTKWave waveform for valid IPv4 UDP minimum payload](screenshots/valid_ipv4_udp_min_payload_gtkwave.png)
+
 Generate a coverage report from the latest regression artifacts:
 
 ```bash
